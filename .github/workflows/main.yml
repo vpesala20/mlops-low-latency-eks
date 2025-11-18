@@ -1,0 +1,66 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*' # Trigger for version tags (e.g., v1.1.0)
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-1 # Ensure this is your correct region!
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: mlops-app
+          IMAGE_TAG: ${{ github.ref_name == 'main' && 'amd64-latest' || github.ref_name }} # Use latest for main, or the tag name
+        run: |
+          docker build -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} .
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Set variables based on branch/tag
+            if [ "${{ github.ref_name }}" == "main" ]; then
+              IMAGE_TAG_TO_PULL="amd64-latest"
+            else
+              IMAGE_TAG_TO_PULL="${{ github.ref_name }}"
+            fi
+
+            # Environment setup
+            CONTAINER_NAME=mlops-app
+            IMAGE_URL=340148571983.dkr.ecr.us-west-1.amazonaws.com/${CONTAINER_NAME}:${IMAGE_TAG_TO_PULL}
+            
+            # Login to ECR on EC2 instance
+            aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin 340148571983.dkr.ecr.us-west-1.amazonaws.com
+
+            # Stop and remove old container instances
+            docker stop ${CONTAINER_NAME} || true
+            docker rm ${CONTAINER_NAME} || true
+
+            # Force pull the new image
+            docker pull ${IMAGE_URL}
+
+            # Run the new container, mapping host port 8000 to container port 8080
+            docker run -d --rm --name ${CONTAINER_NAME} -p 8000:8080 ${IMAGE_URL}
