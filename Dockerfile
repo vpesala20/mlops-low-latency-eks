@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.9-slim-buster
 
 WORKDIR /usr/src/app
 
@@ -10,5 +10,5 @@ COPY model.joblib ./
 
 COPY model.py ./
 
-# FINAL FIX: Use Gunicorn as the stable production entrypoint
+# Using Gunicorn for stable production entrypoint
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "model:app"]
