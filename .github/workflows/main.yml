@@ -19,7 +19,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-1 # Ensure this is your correct region!
+          aws-region: us-west-1
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -41,26 +41,28 @@ jobs:
           username: ec2-user
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Set variables based on branch/tag
+            # Set image tag based on trigger (main branch uses amd64-latest, tags use the tag name)
             if [ "${{ github.ref_name }}" == "main" ]; then
               IMAGE_TAG_TO_PULL="amd64-latest"
             else
               IMAGE_TAG_TO_PULL="${{ github.ref_name }}"
             fi
 
-            # Environment setup
-            CONTAINER_NAME=mlops-app
-            IMAGE_URL=340148571983.dkr.ecr.us-west-1.amazonaws.com/${CONTAINER_NAME}:${IMAGE_TAG_TO_PULL}
-            
-            # Login to ECR on EC2 instance
-            aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin 340148571983.dkr.ecr.us-west-1.amazonaws.com
+            CONTAINER_NAME="mlops-app"
+            AWS_ACCOUNT_ID="340148571983"
+            AWS_REGION="us-west-1"
 
-            # Stop and remove old container instances
+            IMAGE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTAINER_NAME}:${IMAGE_TAG_TO_PULL}"
+            
+            # 1. Login to ECR on EC2 instance (using pipe)
+            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+            # 2. Stop and remove old container instances
             docker stop ${CONTAINER_NAME} || true
             docker rm ${CONTAINER_NAME} || true
 
-            # Force pull the new image
+            # 3. Force pull the new image
             docker pull ${IMAGE_URL}
 
-            # Run the new container, mapping host port 8000 to container port 8080
-            docker run -d --rm --name ${CONTAINER_NAME} -p 8000:8080 ${IMAGE_URL}
+            # 4. Run the new container, mapping host port 8000 to container port 8080
+            docker run -d --rm --name ${CONTAINER_NAME} -p 8000:8080 ${IMAGE_URL} python model.py
