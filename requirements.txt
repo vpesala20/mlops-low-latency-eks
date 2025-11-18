@@ -1,4 +1,7 @@
 flask
+gunicorn
 scikit-learn
+pandas
 numpy
-# Trigger for CI/CD Pipeline
+
+psutil
