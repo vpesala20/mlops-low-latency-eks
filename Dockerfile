@@ -10,4 +10,5 @@ COPY model.joblib ./
 
 COPY model.py ./
 
-CMD ["python", "model.py"]
+# FINAL FIX: Use Gunicorn as the stable production entrypoint
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "model:app"]
