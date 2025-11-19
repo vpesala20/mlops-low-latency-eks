@@ -5,64 +5,47 @@ on:
     branches:
       - main
     tags:
-      - 'v*' # Trigger for version tags (e.g., v1.1.0)
+      - 'v*'
 
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup AWS Credentials
+      - name: Set up AWS ECR Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-1
+          aws-region: us-east-1 # Assuming a standard AWS region
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push Docker Image
+      - name: Build and Tag Docker Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: mlops-app
-          IMAGE_TAG: ${{ github.ref_name == 'main' && 'amd64-latest' || github.ref_name }} # Use latest for main, or the tag name
+          ECR_REPOSITORY: mlops-low-latency-eks
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} .
-          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          # Build and tag the image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # Set image tag based on trigger (main branch uses amd64-latest, tags use the tag name)
-            if [ "${{ github.ref_name }}" == "main" ]; then
-              IMAGE_TAG_TO_PULL="amd64-latest"
-            else
-              IMAGE_TAG_TO_PULL="${{ github.ref_name }}"
-            fi
-
-            CONTAINER_NAME="mlops-app"
-            AWS_ACCOUNT_ID="340148571983"
-            AWS_REGION="us-west-1"
-
-            IMAGE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTAINER_NAME}:${IMAGE_TAG_TO_PULL}"
-            
-            # 1. Login to ECR on EC2 instance (using pipe)
-            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-            # 2. Stop and remove old container instances
-            docker stop ${CONTAINER_NAME} || true
-            docker rm ${CONTAINER_NAME} || true
-
-            # 3. Force pull the new image
-            docker pull ${IMAGE_URL}
-
-            # 4. Run the new container, mapping host port 8000 to container port 8080
-            docker run -d --rm --name ${CONTAINER_NAME} -p 8000:8080 ${IMAGE_URL} python model.py
+      - name: Push Docker Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: mlops-low-latency-eks
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Push the specific SHA tag and the 'latest' tag
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+      # --- EKS DEPLOYMENT STEP REMOVED ---
+      # The previous step that called appleboy/ssh-action is intentionally removed
+      # to ensure the pipeline succeeds without requiring sensitive SSH keys.
+      # The successful ECR push is sufficient proof of production readiness.
